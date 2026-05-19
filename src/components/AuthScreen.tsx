@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import type { User } from 'firebase/auth';
 import { Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react';
 import bgLight from '../assets/bg-light.png';
 
@@ -12,6 +14,19 @@ export function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const syncUserToSupabase = async (user: User, displayName?: string) => {
+    try {
+      await supabase.from('profiles').upsert({
+        id: user.uid,
+        name: displayName || user.displayName || 'User',
+        avatar_url: user.photoURL || null,
+        email: user.email || ''
+      }, { onConflict: 'id' });
+    } catch (err) {
+      console.error('Error syncing user to Supabase:', err);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -19,13 +34,15 @@ export function AuthScreen() {
 
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const { user } = await signInWithEmailAndPassword(auth, email, password);
+        await syncUserToSupabase(user);
       } else {
         // Create user
         const { user } = await createUserWithEmailAndPassword(auth, email, password);
         
         // Update user profile with name
         await updateProfile(user, { displayName: name });
+        await syncUserToSupabase(user, name);
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred during authentication.');
@@ -39,7 +56,8 @@ export function AuthScreen() {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const { user } = await signInWithPopup(auth, provider);
+      await syncUserToSupabase(user);
     } catch (err: any) {
       setError(err.message || 'Google sign-in failed.');
     } finally {
